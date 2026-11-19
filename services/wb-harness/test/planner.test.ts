@@ -35,6 +35,13 @@ describe("planToolCalls", () => {
     })
   })
 
+  test("plans a read for a question about a file", () => {
+    const plan = planToolCalls(tools, "какие types указаны в tsconfig.json?")
+
+    expect(plan.calls[0]?.name).toBe("read")
+    expect(plan.calls[0]?.arguments.filePath).toBe("tsconfig.json")
+  })
+
   test("does not plan tools for a general question", () => {
     expect(planToolCalls(tools, "что такое замыкание?").calls).toEqual([])
   })

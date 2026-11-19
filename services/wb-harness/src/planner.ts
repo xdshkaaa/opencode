@@ -28,7 +28,7 @@ const writeIntent = word("создай файл|запиши|create file|write f
 const editIntent = word("измени|замени|исправь|edit|replace|patch")
 const fetchIntent = word("открой ссылку|загрузи|fetch|https?|url")
 
-const pathPattern = /(?:^|[\s(«"'])([\w./@-]*\/[\w./@-]+|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|toml|yaml|yml|css|html|py|go|rs|java|sh|txt))(?=$|[\s)»"',:;])/i
+const pathPattern = /(?:^|[\s(«"'])([\w./@-]*\/[\w./@-]+|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|toml|yaml|yml|css|html|py|go|rs|java|sh|txt))(?=$|[\s)»"',:;?!.])/i
 
 export function planToolCalls(tools: ToolSpec[], text: string): Plan {
   const byName = new Map(tools.map((tool) => [tool.name, tool]))
@@ -116,7 +116,17 @@ export function planToolCalls(tools: ToolSpec[], text: string): Plan {
     if (name) return { calls: [{ name, arguments: { pattern: "*" } }], reason: "read without path" }
   }
 
+  // "какие types указаны в tsconfig.json" has no action verb but clearly asks about a file.
+  if (path && mentionsFileContent(text)) {
+    const name = resolve("read", "read_file", "cat")
+    if (name) return { calls: [{ name, arguments: { filePath: path, path } }], reason: "file question" }
+  }
+
   return { calls: [], reason: "no tool intent" }
+}
+
+function mentionsFileContent(text: string): boolean {
+  return /(какие|какой|какая|какое|что|где|сколько|указан|написан|содержит|описан|определен)/iu.test(text)
 }
 
 function extractCommand(text: string): string | undefined {
