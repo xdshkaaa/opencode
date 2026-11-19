@@ -15,6 +15,8 @@ clients can use it as a model with tool calling and coding.
 - Coding: code generation and explanation are answered by the Wildberries model directly.
 - Shopping enrichment: product links, catalog search, product details, unit-price comparison run before the
   model call and are injected into the prompt as plain facts.
+- Product links: the assistant's `search` event carries full product cards. The harness collects them, appends
+  any URLs the answer omitted as a `Ссылки на товары` block, and returns the same cards as `wb_harness.products`.
 
 ## Discovered upstream protocol
 
@@ -65,6 +67,9 @@ Rate limiting: `429` with `retry-after` (seconds) and `{"error":"rate_limit_exce
 Because of that, tool choice is heuristic (intent + path/command parsing), not model-driven. It works well for
 explicit requests ("прочитай файл src/index.ts", "запусти git status", "найди все файлы *.ts"), and falls back
 to the model for everything else.
+
+Shopping questions bypass the client's coding tools: "найди носки" goes to the Wildberries search instead of
+grepping the project for "носки".
 
 ## Quick start
 
@@ -162,6 +167,14 @@ Non-streaming responses and the final stream chunk include `wb_harness`:
     "scenario": "chat",
     "state": "success",
     "suggestions": ["..."],
+    "products": [
+      {
+        "id": 1073560311,
+        "name": "Носки мужские спортивные",
+        "priceRub": 351,
+        "url": "https://www.wildberries.ru/catalog/1073560311/detail.aspx"
+      }
+    ],
     "fallback": false
   }
 }

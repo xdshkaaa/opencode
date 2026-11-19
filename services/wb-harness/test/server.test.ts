@@ -11,6 +11,7 @@ const upstream = Bun.serve({
     const raw = await request.text()
     requests.push(raw)
     const refused = raw.includes("ОТКАЗ")
+    const searched = raw.includes("носки")
     const frames = refused
       ? [
           { type: "text", data: { block_position: "single", text: "Извините, я не могу предоставить такой ответ." } },
@@ -27,6 +28,30 @@ const upstream = Bun.serve({
               event: { message_id: "m1", sender: "user" },
             },
           },
+          ...(searched
+            ? [
+                {
+                  type: "search",
+                  data: {
+                    snippet_type: "products_base",
+                    payload: {
+                      search: {
+                        products: [
+                          {
+                            id: 1073560311,
+                            name: "Носки мужские спортивные черные высокие комплект 5 пар",
+                            brand: "LEGAS",
+                            reviewRating: 4.8,
+                            feedbacks: 117,
+                            sizes: [{ price: { total: 35100 } }],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ]
+            : []),
           { type: "text", data: { block_position: "start", text: "Первый " } },
           { type: "text", data: { block_position: "end", text: "ответ." } },
           {
@@ -68,14 +93,28 @@ const anonymous = Bun.serve({
   fetch: createHarness({ ...config, auth: { token: "", userdata: "", source: "none" } }, { startedAt: Date.now() }),
 })
 
+// Catalog enrichment is off here so the test never reaches the network.
+const offline = Bun.serve({
+  port: 0,
+  fetch: createHarness(
+    { ...config, enrichment: { enabled: false, timeoutMs: 2000 } },
+    { startedAt: Date.now() },
+  ),
+})
+
 function url(path: string) {
   return `http://127.0.0.1:${harness.port}${path}`
+}
+
+function offlineURL(path: string) {
+  return `http://127.0.0.1:${offline.port}${path}`
 }
 
 beforeAll(() => registerShoppingTools())
 afterAll(() => {
   harness.stop(true)
   anonymous.stop(true)
+  offline.stop(true)
   upstream.stop(true)
 })
 
@@ -261,5 +300,67 @@ describe("wb-harness", () => {
     expect(body.wb_harness.fallback).toBe(true)
     expect(body.choices[0]?.message.content).toContain("bash:")
     expect(body.choices[0]?.message.content).toContain("On branch dev")
+  })
+
+  test("searches products instead of calling grep and appends links", async () => {
+    const response = await fetch(offlineURL("/v1/chat/completions"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "wb-agent",
+        messages: [{ role: "user", content: "найди носки" }],
+        tools: [{ type: "function", function: { name: "grep", description: "Search files", parameters: {} } }],
+      }),
+    })
+
+    const body = (await response.json()) as {
+      choices: Array<{ finish_reason: string; message: { content: string } }>
+      wb_harness: { products: Array<{ id: number; url: string }> }
+    }
+
+    expect(body.choices[0]?.finish_reason).toBe("stop")
+    expect(body.choices[0]?.message.content).toContain("Ссылки на товары:")
+    expect(body.choices[0]?.message.content).toContain(
+      "https://www.wildberries.ru/catalog/1073560311/detail.aspx",
+    )
+    expect(body.wb_harness.products[0]?.id).toBe(1073560311)
+  })
+
+  test("appends the article link even when the model omits it", async () => {
+    const response = await fetch(url("/v1/chat/completions"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "дай ссылку на артикул 987654321" }],
+      }),
+    })
+
+    const body = (await response.json()) as {
+      choices: Array<{ message: { content: string } }>
+      wb_harness: { products: Array<{ id: number }> }
+    }
+
+    expect(body.choices[0]?.message.content).toContain(
+      "https://www.wildberries.ru/catalog/987654321/detail.aspx",
+    )
+    expect(body.wb_harness.products[0]?.id).toBe(987654321)
+  })
+
+  test("still plans coding tools for a code search", async () => {
+    const response = await fetch(offlineURL("/v1/chat/completions"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "найди функцию parseArguments" }],
+        tools: [{ type: "function", function: { name: "grep", description: "Search files", parameters: {} } }],
+      }),
+    })
+
+    const body = (await response.json()) as {
+      choices: Array<{ finish_reason: string; message: { tool_calls: Array<{ function: { name: string } }> } }>
+    }
+
+    expect(body.choices[0]?.finish_reason).toBe("tool_calls")
+    expect(body.choices[0]?.message.tool_calls[0]?.function.name).toBe("grep")
   })
 })

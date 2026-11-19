@@ -1,12 +1,6 @@
-export type CatalogProduct = {
-  id: number
-  name: string
-  brand?: string
-  priceRub?: number
-  rating?: number
-  feedbacks?: number
-  url: string
-}
+import { readProducts, type WBProduct } from "../wb/products"
+
+export type CatalogProduct = WBProduct
 
 const searchHosts = [
   "https://search.wb.ru/exactmatch/ru/common/v13/search",
@@ -79,76 +73,4 @@ export async function productDetails(
   })
   if (!response.ok) throw new Error(`card endpoint ${response.status}`)
   return readProducts(await response.json())[0]
-}
-
-export function productURL(id: number): string {
-  return `https://www.wildberries.ru/catalog/${id}/detail.aspx`
-}
-
-function readProducts(payload: unknown): CatalogProduct[] {
-  const products = readPath(payload, ["data", "products"]) ?? readPath(payload, ["products"])
-  if (!Array.isArray(products)) return []
-
-  return products.flatMap((raw) => {
-    if (!isRecord(raw)) return []
-    const id = typeof raw.id === "number" ? raw.id : Number(raw.id)
-    if (!Number.isFinite(id)) return []
-    const name = typeof raw.name === "string" ? raw.name : `Артикул ${id}`
-    const brand = typeof raw.brand === "string" ? raw.brand : undefined
-    return [
-      {
-        id,
-        name,
-        brand,
-        priceRub: readPrice(raw),
-        rating: typeof raw.reviewRating === "number" ? raw.reviewRating : undefined,
-        feedbacks: typeof raw.feedbacks === "number" ? raw.feedbacks : undefined,
-        url: productURL(id),
-      },
-    ]
-  })
-}
-
-function readPrice(raw: Record<string, unknown>): number | undefined {
-  const sizes = Array.isArray(raw.sizes) ? raw.sizes : []
-  for (const size of sizes) {
-    if (!isRecord(size)) continue
-    const price = isRecord(size.price) ? size.price : undefined
-    if (!price) continue
-    const total = price.total ?? price.product ?? price.basic
-    if (typeof total === "number" && total > 0) return normalizeKopecks(total)
-  }
-  const salePrice = isRecord(raw.salePriceU) ? undefined : raw.salePriceU
-  if (typeof salePrice === "number" && salePrice > 0) return normalizeKopecks(salePrice)
-  return
-}
-
-/** WB price fields are kopecks; older payloads already come in rubles. */
-function normalizeKopecks(value: number): number {
-  return value >= 10000 ? value / 100 : value
-}
-
-function readPath(payload: unknown, path: string[]): unknown {
-  return path.reduce<unknown>((current, key) => {
-    if (!isRecord(current)) return
-    return current[key]
-  }, payload)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-export function formatProducts(products: CatalogProduct[]): string {
-  return products
-    .map((product) => {
-      const price = product.priceRub ? `${product.priceRub.toFixed(0)} ₽` : "цена не указана"
-      const brand = product.brand ? `${product.brand} ` : ""
-      const rating =
-        product.rating && product.feedbacks
-          ? `, рейтинг ${product.rating.toFixed(1)} (${product.feedbacks} отзывов)`
-          : ""
-      return `- ${brand}${product.name} — ${price}${rating}; ${product.url}`
-    })
-    .join("\n")
 }

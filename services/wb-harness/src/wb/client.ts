@@ -1,3 +1,4 @@
+import { readProducts, type WBProduct } from "./products"
 import { parseSSE, type SSEMessage } from "./sse"
 
 export type WBChunk = {
@@ -144,6 +145,7 @@ export type CollectedMessage = {
   scenario?: string
   state?: string
   suggests: string[]
+  products: WBProduct[]
 }
 
 /**
@@ -153,6 +155,7 @@ export type CollectedMessage = {
 export async function collectWBMessage(input: WBMessageInput): Promise<CollectedMessage> {
   let text = ""
   const suggests: string[] = []
+  const products = new Map<number, WBProduct>()
   let sessionID: string | undefined = input.sessionID
   let scenario: string | undefined
   let state: string | undefined
@@ -161,6 +164,14 @@ export async function collectWBMessage(input: WBMessageInput): Promise<Collected
     if (chunk.type === "system_info") {
       const value = chunk.data.session_id
       if (typeof value === "string") sessionID = value
+    }
+
+    if (chunk.type === "search") {
+      const payload = isRecord(chunk.data.payload) ? chunk.data.payload : chunk.data
+      const search = isRecord(payload.search) ? payload.search : payload
+      for (const product of readProducts(search)) {
+        if (!products.has(product.id)) products.set(product.id, product)
+      }
     }
 
     if (chunk.type === "text") {
@@ -188,5 +199,5 @@ export async function collectWBMessage(input: WBMessageInput): Promise<Collected
     }
   }
 
-  return { sessionID, text, scenario, state, suggests }
+  return { sessionID, text, scenario, state, suggests, products: [...products.values()] }
 }

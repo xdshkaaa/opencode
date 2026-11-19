@@ -77,7 +77,12 @@ The two integrations are independent:
 Requests are enriched with facts from the public catalog (`wb_product_link`, `wb_product_details`,
 `wb_search_products`, `wb_compare_unit_prices`) and sent to the assistant over its native SSE protocol. The reply is
 converted back into OpenAI format, including streaming deltas, usage-free chunks, and `wb_harness` metadata
-(planned tools, enrichment status, scenario, moderation state, suggestions, fallback flag).
+(planned tools, enrichment status, scenario, moderation state, suggestions, product cards, fallback flag).
+
+Product links do not depend on the model mentioning them. A search turn emits a `search` event with full product
+cards; the harness collects those cards, appends any missing URLs as a deterministic `Ссылки на товары` block, and
+returns them as `wb_harness.products`. Shopping questions also bypass the client's coding tools, so "найди носки"
+searches products instead of grepping the project for "носки".
 
 ## Quick start
 

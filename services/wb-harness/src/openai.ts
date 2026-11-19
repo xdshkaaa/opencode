@@ -1,6 +1,8 @@
 import type { WBConfig } from "./config"
 import { planToolCalls, type ToolSpec } from "./planner"
-import { buildPrompt, enrich } from "./tools/enrich"
+import { isShoppingQuery } from "./shopping"
+import { buildPrompt, enrich, enrichmentProducts } from "./tools/enrich"
+import { appendProductLinks, formatProductLinks, type WBProduct } from "./wb/products"
 import { collectWBMessage } from "./wb/client"
 
 export type ChatMessage = {
@@ -23,7 +25,13 @@ export type HandlerResult = {
   status: number
   body: unknown
   headers?: Record<string, string>
-  meta?: { tools: string[]; scenario?: string; state?: string; fallback?: boolean }
+  meta?: {
+    tools: string[]
+    scenario?: string
+    state?: string
+    fallback?: boolean
+    products?: number
+  }
 }
 
 export async function handleChatCompletions(
@@ -34,7 +42,8 @@ export async function handleChatCompletions(
   const userText = lastUserText(request.messages)
   const hasToolResults = request.messages.at(-1)?.role === "tool"
 
-  if (request.tools.length && userText && !hasToolResults) {
+  // Shopping questions must reach the catalog, not the client's grep/glob tools.
+  if (request.tools.length && userText && !hasToolResults && !isShoppingQuery(userText)) {
     const plan = planToolCalls(request.tools, userText)
     if (plan.calls.length) {
       const toolCalls = plan.calls.map((call) => ({
@@ -76,12 +85,15 @@ export async function handleChatCompletions(
     signal,
   })
 
+  const products = mergeProducts(message.products, enrichmentProducts(enrichment.results))
+
   // The shopping assistant refuses off-topic turns (shell, git) even when the
   // answer lives in the tool output. Return the tool results instead of a refusal.
   const fallback = isRefusal(message.text, message.state)
-    ? summarizeToolResults(request.messages)
+    ? (summarizeToolResults(request.messages) ?? formatProductLinks(products)) || undefined
     : undefined
-  const content = fallback ?? message.text
+  // The assistant often describes products without URLs; its `search` event has them.
+  const content = appendProductLinks(fallback ?? message.text, products)
 
   const toolTrace = {
     tools: [...request.tools.map((tool) => tool.name), ...enrichment.tools],
@@ -89,6 +101,7 @@ export async function handleChatCompletions(
     scenario: message.scenario,
     state: message.state,
     suggestions: message.suggests,
+    products: products.slice(0, 10),
     ...(fallback ? { fallback: true } : {}),
   }
 
@@ -101,7 +114,13 @@ export async function handleChatCompletions(
         connection: "keep-alive",
       },
       body: streamContent(content, request.model, toolTrace),
-      meta: { tools: toolTrace.tools, scenario: message.scenario, state: message.state, fallback: Boolean(fallback) },
+      meta: {
+        tools: toolTrace.tools,
+        scenario: message.scenario,
+        state: message.state,
+        fallback: Boolean(fallback),
+        products: products.length,
+      },
     }
   }
 
@@ -111,7 +130,13 @@ export async function handleChatCompletions(
       ...completion(request.model, { role: "assistant", content }, "stop"),
       wb_harness: toolTrace,
     },
-    meta: { tools: toolTrace.tools, scenario: message.scenario, state: message.state, fallback: Boolean(fallback) },
+    meta: {
+      tools: toolTrace.tools,
+      scenario: message.scenario,
+      state: message.state,
+      fallback: Boolean(fallback),
+      products: products.length,
+    },
   }
 }
 
@@ -119,6 +144,15 @@ function isRefusal(text: string, state: string | undefined): boolean {
   if (state === "ignored") return true
   if (!text.trim()) return true
   return /не могу предоставить|политик безопасности|помогать с вопросами покупок/i.test(text)
+}
+
+function mergeProducts(...groups: WBProduct[][]): WBProduct[] {
+  const seen = new Set<number>()
+  return groups.flat().filter((product) => {
+    if (seen.has(product.id)) return false
+    seen.add(product.id)
+    return true
+  })
 }
 
 function summarizeToolResults(messages: ChatMessage[]): string | undefined {

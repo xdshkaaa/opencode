@@ -1,6 +1,14 @@
+import { isShoppingQuery } from "../shopping"
+import {
+  formatProducts,
+  productFromURL,
+  productURL,
+  readProducts,
+  type WBProduct,
+} from "../wb/products"
 import { extractOffers, formatOffersForContext, rankOffers } from "./compare"
 import { registerTool, runTool, toolsForText, type ToolResult } from "./registry"
-import { formatProducts, productDetails, productURL, searchProducts } from "./wb-catalog"
+import { productDetails, searchProducts } from "./wb-catalog"
 
 export type Enrichment = {
   tools: string[]
@@ -10,7 +18,6 @@ export type Enrichment = {
 
 const articlePattern = /\b(\d{5,15})\b/
 const linkIntent = /ссылк|карточк|артикул|страниц/i
-const searchIntent = /найд|поиск|покажи|подбер|посоветуй|какие есть|сколько стоит/i
 const detailsIntent = /цен|стоит|характеристик|подробн|отзыв/i
 
 export function registerShoppingTools() {
@@ -61,7 +68,7 @@ export function registerShoppingTools() {
     description: "Searches the Wildberries catalog by text query and returns top products.",
     match: (text) => {
       if (articlePattern.test(text) && linkIntent.test(text)) return
-      if (!searchIntent.test(text)) return
+      if (!isShoppingQuery(text)) return
       const query = stripIntentWords(text)
       if (query.length < 3) return
       return { query }
@@ -104,7 +111,10 @@ export function registerShoppingTools() {
 
 function stripIntentWords(text: string): string {
   return text
-    .replace(/\b(найди|найти|поиск|покажи|подбери|посоветуй|какие есть|сколько стоит|цена|купить)\b/gi, " ")
+    .replace(
+      /\b(найди|найти|поищи|поиск|ищу|ищем|покажи|подбери|посоветуй|скинь|скиньте|дай|дайте|давай|хочу|хотел|нужны|нужен|нужна|купи|купить|закажи|какие есть|сколько стоит|почём|почем|цена|цены|товар|товары|каталог|ссылка|ссылку|ссылки|ссылке|пожалуйста|мне)\b/gi,
+      " ",
+    )
     .replace(/[?!.,;]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -133,4 +143,22 @@ export async function enrich(text: string, timeoutMs: number): Promise<Enrichmen
 export function buildPrompt(text: string, enrichment: Enrichment): string {
   if (!enrichment.context) return text
   return `${enrichment.context}\n\nВопрос покупателя: ${text}`
+}
+
+/** Product cards produced by enrichment, so links survive even without a search event. */
+export function enrichmentProducts(results: ToolResult[]): WBProduct[] {
+  return results.flatMap((result) => {
+    if (!result.ok) return []
+    const data = result.data
+    const products = Array.isArray(data)
+      ? readProducts({ products: data })
+      : data && typeof data === "object"
+        ? readProducts({ products: [data] })
+        : []
+    if (products.length) return products
+    return result.artifacts.flatMap((url) => {
+      const product = productFromURL(url)
+      return product ? [product] : []
+    })
+  })
 }

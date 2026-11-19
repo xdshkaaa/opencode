@@ -14,6 +14,7 @@ export type HarnessState = {
     scenario?: string
     state?: string
     fallback?: boolean
+    products?: number
   }
 }
 
@@ -72,6 +73,7 @@ export function createHarness(config: WBConfig, state: HarnessState) {
           scenario: result.meta?.scenario,
           state: result.meta?.state,
           fallback: result.meta?.fallback,
+          products: result.meta?.products,
         }
         return withCors(result)
       }
